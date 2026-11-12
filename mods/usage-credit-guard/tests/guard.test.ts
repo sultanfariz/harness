@@ -185,7 +185,7 @@ test('session start shows current known usage persistently and continues lifecyc
     ui: { status: text => { status = text } },
   }
   await hooks['session.start']($, {}, async () => { continued = true; return { ok: true } })
-  expect(status).toBe('Guard active · 5h: 42% · weekly: 18%')
+  expect(status).toBe('Guard active · 5h: 42% · weekly: 18% · context: ? tokens')
   expect(continued).toBe(true)
 })
 
@@ -197,7 +197,7 @@ test('status preserves a below-threshold decimal without claiming approval is re
     ui: { status: text => { status = text } },
   }
   await hooks['session.start']($, {}, async () => ({}))
-  expect(status).toBe('Guard active · 5h: 99.9% · weekly: 18%')
+  expect(status).toBe('Guard active · 5h: 99.9% · weekly: 18% · context: ? tokens')
 })
 
 test('session start shows unknown usage and approval requirement when usage fails', async () => {
@@ -208,7 +208,7 @@ test('session start shows unknown usage and approval requirement when usage fail
     ui: { status: text => { status = text } },
   }
   await hooks['session.start']($, {}, async () => ({}))
-  expect(status).toBe('Guard active · 5h: ? · weekly: ? · approval required')
+  expect(status).toBe('Guard active · 5h: ? · weekly: ? · context: ? tokens · approval required')
 })
 
 test('session measure updates status and display errors do not block lifecycle', async () => {
@@ -217,7 +217,7 @@ test('session measure updates status and display errors do not block lifecycle',
   const $ = { ui: { status: text => shown.push(text) } }
   let continued = false
   await hooks['session.measure']($, { rateLimits: limits(100, 30).rateLimits }, async () => { continued = true; return {} })
-  expect(shown[0]).toBe('Guard active · 5h: 100% · weekly: 30% · approval required')
+  expect(shown[0]).toBe('Guard active · 5h: 100% · weekly: 30% · context: ? tokens · approval required')
   expect(continued).toBe(true)
 
   const failingUi = { ui: { status: () => Promise.reject(new Error('display unavailable')) } }
@@ -285,7 +285,7 @@ test('status labels an observed reset and recovers when a fresh zero reading arr
   const shown = []
   const $ = { ui: { status: text => shown.push(text) } }
   await hooks['session.measure']($, { rateLimits: limits(undefined, 45).rateLimits }, async () => ({}))
-  expect(shown[0]).toBe('Guard active · 5h: reset · weekly: 45%')
+  expect(shown[0]).toBe('Guard active · 5h: reset · weekly: 45% · context: ? tokens')
   await observeUsage(hooks, limits(0, 45, future))
   const result = await startTurnStep(hooks['turn.step'], limits(0, 45, future), () => { throw new Error('must not ask') }).done
   expect(result.calls).toBe(1)
@@ -386,4 +386,32 @@ test('an observed weekly reset refreshes only when the five-hour window is healt
   const exhausted = handlers()
   await observeUsage(exhausted, limits(100, 100, undefined, expired))
   expect((await startTurnStep(exhausted['turn.step'], limits(100), () => 'Stop').done).calls).toBe(0)
+})
+
+test('startup displays the reported context token count without deriving it from percent', async () => {
+  const hooks = handlers()
+  let status
+  const $ = {
+    session: { usage: async () => ({ ...limits(42, 18), context: { tokens: 12345, window: 200000, percent: 6 } }) },
+    ui: { status: text => { status = text } },
+  }
+  await hooks['session.start']($, {}, async () => ({}))
+  expect(status).toBe('Guard active · 5h: 42% · weekly: 18% · context: 12,345 tokens')
+})
+
+test('context measurements replace the count and clear unavailable or invalid readings', async () => {
+  const hooks = handlers()
+  let status
+  let continued = 0
+  const $ = { ui: { status: text => { status = text } } }
+  for (const [tokens, expected] of [
+    [123456, '123,456'], [1200, '1,200'], [0, '0'],
+    [undefined, '?'], [NaN, '?'], [Infinity, '?'], [-1, '?'], ['123', '?'], [1.5, '?'],
+  ]) {
+    await hooks['session.measure']($, {
+      rateLimits: limits(42, 18).rateLimits, context: { tokens, window: 200000 }, changed: ['context'],
+    }, async () => { continued += 1; return {} })
+    expect(status).toBe(`Guard active · 5h: 42% · weekly: 18% · context: ${expected} tokens`)
+  }
+  expect(continued).toBe(9)
 })
