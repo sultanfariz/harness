@@ -50,11 +50,13 @@ The guard covers main and subagent `turn.step` model requests, plus the separate
 
 ## Usage status
 
-After startup, the status line under the prompt shows the latest reported five-hour and weekly usage. For example:
+After startup, the status line under the prompt shows the latest reported five-hour and weekly usage, plus the current context token count. For example:
 
 ```text
-⚠ usage-credit-guard: Guard active · 5h: 0% · weekly: 8%
+⚠ usage-credit-guard: Guard active · 5h: 0% · weekly: 8% · context: 12,345 tokens
 ```
+
+The context count is the last response's input tokens, including uncached, cache-written, and cache-read tokens. It uses Claude Code's reported count, not a percentage converted back to tokens or a cumulative session total. Before the first response, or just after compaction until the next response, it shows `context: ? tokens`. The count can decrease after compaction. Reading it does not trigger a model or token-counting request.
 
 Values vary by account. An unknown reading appears as `?`; a reading at or above 100% adds `approval required`. The line updates at startup and when Claude Code reports a usage measurement, such as after a turn or a rate-limit percentage change. It is not a live poll.
 

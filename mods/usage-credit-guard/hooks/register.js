@@ -83,18 +83,19 @@ function resetReason(reason, relevant) {
   return resetTimes.length ? `${reason}; ${resetTimes.join('; ')}` : reason
 }
 
-function usageStatus(rateLimits, observedResets) {
+function usageStatus(rateLimits, observedResets, context) {
   const [fiveHour, sevenDay] = usageWindows(rateLimits, observedResets)
   const five = fiveHour?.percentUsed
   const seven = sevenDay?.percentUsed
   const display = limit => limit?.reset ? 'reset' : Number.isFinite(limit?.percentUsed) && limit.percentUsed >= 0 ? `${limit.percentUsed}%` : '?'
   const approvalRequired = !Number.isFinite(five) || five < 0 || !Number.isFinite(seven) || seven < 0 || five >= 100 || seven >= 100
-  return `Guard active · 5h: ${display(fiveHour)} · weekly: ${display(sevenDay)}${approvalRequired ? ' · approval required' : ''}`
+  const tokens = Number.isSafeInteger(context?.tokens) && context.tokens >= 0 ? context.tokens.toLocaleString('en-US') : '?'
+  return `Guard active · 5h: ${display(fiveHour)} · weekly: ${display(sevenDay)} · context: ${tokens} tokens${approvalRequired ? ' · approval required' : ''}`
 }
 
-function showUsageStatus($, rateLimits, observedResets) {
+function showUsageStatus($, rateLimits, observedResets, context) {
   try {
-    const result = $.ui.status(usageStatus(rateLimits, observedResets))
+    const result = $.ui.status(usageStatus(rateLimits, observedResets, context))
     if (result && typeof result.catch === 'function') result.catch(() => {})
   } catch {
     // Display failures must not affect session lifecycle or request gates.
@@ -104,7 +105,7 @@ function showUsageStatus($, rateLimits, observedResets) {
 async function showInitialUsageStatus($, observedResets) {
   try {
     const usage = await $.session.usage()
-    showUsageStatus($, usage?.rateLimits, observedResets)
+    showUsageStatus($, usage?.rateLimits, observedResets, usage?.context)
   } catch {
     showUsageStatus($, undefined, observedResets)
   }
@@ -136,7 +137,7 @@ export function register(on) {
   })
 
   on('session.measure', ($, e, next) => {
-    showUsageStatus($, e.rateLimits, observedResets)
+    showUsageStatus($, e.rateLimits, observedResets, e.context)
     return next(e)
   })
 
