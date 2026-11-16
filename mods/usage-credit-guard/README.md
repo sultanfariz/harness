@@ -56,7 +56,7 @@ After startup, the status line under the prompt shows the latest reported five-h
 ⚠ usage-credit-guard: Guard active · 5h: 0% · weekly: 8% · context: 12,345 tokens
 ```
 
-The context count is the last response's input tokens, including uncached, cache-written, and cache-read tokens. It uses Claude Code's reported count, not a percentage converted back to tokens or a cumulative session total. Before the first response, or just after compaction until the next response, it shows `context: ? tokens`. The count can decrease after compaction. Reading it does not trigger a model or token-counting request.
+The context count is the last response's input tokens, including uncached, cache-written, and cache-read tokens. It uses Claude Code's reported count, not a percentage converted back to tokens or a cumulative session total. Before the first response, it shows `context: ? tokens`. When main-conversation compaction finishes, it immediately shows Claude Code's reported post-compaction conversation size, or `?` if unavailable. The next usage measurement replaces that count with the latest response's input count; it may also show `?` while no response for the new window is available. Skipped compactions, background precomputation, and subagent compactions do not replace the main context count. Reading it does not trigger a model or token-counting request.
 
 Values vary by account. An unknown reading appears as `?`; a reading at or above 100% adds `approval required`. The line updates at startup and when Claude Code reports a usage measurement, such as after a turn or a rate-limit percentage change. It is not a live poll.
 

@@ -415,3 +415,98 @@ test('context measurements replace the count and clear unavailable or invalid re
   }
   expect(continued).toBe(9)
 })
+
+test('main compaction refreshes context before another turn even if usage is stale', async () => {
+  for (const trigger of ['manual', 'auto', 'plugin']) {
+    const hooks = handlers()
+    let status
+    let calls = 0
+    const $ = {
+      session: { usage: async () => ({ ...limits(42, 18), context: { tokens: 123456 } }) },
+      ui: { status: text => { status = text } },
+    }
+    await hooks['session.start']($, {}, async () => ({}))
+    expect(status).toContain('context: 123,456 tokens')
+    const event = { trigger, messages: [] }
+    const result = { messages: [], tokensBefore: 123456, tokensAfter: 12345 }
+    const returned = await hooks['session.compact']($, event, async passed => {
+      expect(passed).toBe(event)
+      calls += 1
+      return result
+    })
+    expect(returned).toBe(result)
+    expect(calls).toBe(1)
+    expect(status).toBe('Guard active · 5h: 42% · weekly: 18% · context: 12,345 tokens')
+    await hooks['session.measure']($, { ...limits(42, 18), context: { tokens: 13000 } }, async () => ({}))
+    expect(status).toContain('context: 13,000 tokens')
+  }
+})
+
+test('missing or invalid post-compaction counts never retain the old context count', async () => {
+  for (const tokensAfter of [undefined, NaN, -1, Infinity, '123', 1.5, 0]) {
+    const hooks = handlers()
+    let status
+    const $ = {
+      session: { usage: async () => ({ ...limits(42, 18), context: { tokens: 123456 } }) },
+      ui: { status: text => { status = text } },
+    }
+    await hooks['session.compact']($, { trigger: 'manual' }, async () => ({ messages: [], tokensAfter }))
+    expect(status).toContain(`context: ${tokensAfter === 0 ? '0' : '?'} tokens`)
+  }
+})
+
+test('skipped, precomputed and subagent compactions do not replace main context status', async () => {
+  const hooks = handlers()
+  let reads = 0
+  let displays = 0
+  const $ = {
+    session: { usage: async () => { reads += 1; return limits(42, 18) } },
+    ui: { status: () => { displays += 1 } },
+  }
+  for (const [event, result] of [
+    [{ trigger: 'manual' }, { skip: 'not enough messages' }],
+    [{ trigger: 'precompute' }, { messages: [], tokensAfter: 123 }],
+    [{ trigger: 'auto', agentId: 'agent-test' }, { messages: [], tokensAfter: 123 }],
+  ]) {
+    expect(await hooks['session.compact']($, event, async () => result)).toBe(result)
+  }
+  expect(reads).toBe(0)
+  expect(displays).toBe(0)
+})
+
+test('post-compaction display failures preserve the result and never retry compaction', async () => {
+  const hooks = handlers()
+  let calls = 0
+  const result = { messages: [], tokensAfter: 123 }
+  let status
+  const $ = {
+    session: { usage: async () => { throw new Error('unavailable') } },
+    ui: { status: text => { status = text; throw new Error('unavailable') } },
+  }
+  const returned = await hooks['session.compact']($, { trigger: 'manual' }, async () => { calls += 1; return result })
+  expect(returned).toBe(result)
+  expect(status).toContain('context: 123 tokens')
+  expect(calls).toBe(1)
+  let failed = false
+  try {
+    await hooks['session.compact']($, { trigger: 'manual' }, async () => { calls += 1; throw new Error('compact failed') })
+  } catch { failed = true }
+  expect(failed).toBe(true)
+  expect(calls).toBe(2)
+})
+
+test('engine compaction result refreshes status without a model dispatch', async ($, on) => {
+  const messages = [{ role: 'user', text: 'Test summary', toolUses: [] }]
+  let status
+  let calls = 0
+  on('session.usage', () => ({ value: { ...limits(42, 18), context: { tokens: 123456, window: 200000 } } }) as never)
+  on('ui.status', ($, e) => { status = e; return { value: undefined } as never })
+  on('session.compact', () => {
+    calls += 1
+    return { messages, tokensBefore: 123456, tokensAfter: 12345 }
+  })
+  const result = await $.session.compact({ trigger: 'manual', messages } as never)
+  expect(result.tokensAfter).toBe(12345)
+  expect(calls).toBe(1)
+  expect(JSON.stringify(status)).toContain('context: 12,345 tokens')
+})

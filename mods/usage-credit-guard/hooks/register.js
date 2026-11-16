@@ -102,12 +102,12 @@ function showUsageStatus($, rateLimits, observedResets, context) {
   }
 }
 
-async function showInitialUsageStatus($, observedResets) {
+async function refreshUsageStatus($, observedResets, context) {
   try {
     const usage = await $.session.usage()
-    showUsageStatus($, usage?.rateLimits, observedResets, usage?.context)
+    showUsageStatus($, usage?.rateLimits, observedResets, context ?? usage?.context)
   } catch {
-    showUsageStatus($, undefined, observedResets)
+    showUsageStatus($, undefined, observedResets, context)
   }
 }
 
@@ -132,13 +132,22 @@ export function register(on) {
   })
 
   on('session.start', async ($, e, next) => {
-    await showInitialUsageStatus($, observedResets)
+    await refreshUsageStatus($, observedResets)
     return next(e)
   })
 
   on('session.measure', ($, e, next) => {
     showUsageStatus($, e.rateLimits, observedResets, e.context)
     return next(e)
+  })
+
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e)
+    if (!e.agentId && e.trigger !== 'precompute' && !result.skip) {
+      // The usage snapshot can still describe the old window while compaction returns.
+      await refreshUsageStatus($, observedResets, { tokens: result.tokensAfter })
+    }
+    return result
   })
 
   on('turn.step', async function* ($, e, next) {
